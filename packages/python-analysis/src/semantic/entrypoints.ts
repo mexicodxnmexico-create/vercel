@@ -65,6 +65,29 @@ export async function getStringConstant(
 const DJANGO_SETTINGS_MODULE_PATTERN_RE = /DJANGO_SETTINGS_MODULE/;
 
 /**
+ * Check if Python source uses the @task decorator from django-tasks.
+ * Used at build time to detect projects that need Vercel Queue integration.
+ *
+ * @param source - Python source code to scan
+ * @returns true if @task usage is found
+ */
+export function containsDjangoTasks(source: string): boolean {
+  return source.includes('@task');
+}
+
+/**
+ * Check if Python source uses django-tasks features not supported by the
+ * Vercel Queue integration. Currently detects priority usage, which has no
+ * equivalent in Vercel Queues. Used to emit build-time warnings.
+ *
+ * @param source - Python source code to scan
+ * @returns true if unsupported features are found
+ */
+export function containsUnsupportedDjangoTaskFeatures(source: string): boolean {
+  return /priority\s*=/.test(source);
+}
+
+/**
  * Parse manage.py content for DJANGO_SETTINGS_MODULE (e.g. from
  * os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'app.settings')).
  * Uses the WASM Python parser to extract the value from the AST.

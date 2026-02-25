@@ -13,6 +13,8 @@
 
 export {
   containsAppOrHandler,
+  containsDjangoTasks,
+  containsUnsupportedDjangoTaskFeatures,
   getStringConstant,
   parseDjangoSettingsModule,
 } from './semantic/entrypoints';

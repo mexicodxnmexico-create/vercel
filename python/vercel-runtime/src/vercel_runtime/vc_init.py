@@ -534,6 +534,10 @@ except Exception:
     _stderr(traceback.format_exc())
     exit(1)
 
+with contextlib.suppress(Exception):
+    from vercel_runtime._internal import django_queue as _vc_dq
+    _vc_dq.patch_enqueue()
+
 _use_legacy_asyncio = sys.version_info < (3, 10)
 
 

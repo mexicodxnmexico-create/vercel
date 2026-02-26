@@ -1244,6 +1244,9 @@ describe('routes edit', () => {
   // ---------------------------------------------------------------------------
 
   describe('interactive mode', () => {
+    // Each test's selectResponses starts with 'manual' because the edit
+    // command now asks "How would you like to edit?" (AI vs manual) before
+    // showing the field-by-field menu. 'manual' answers that first prompt.
     it('should edit name interactively', async () => {
       useEditRouteComprehensive();
 

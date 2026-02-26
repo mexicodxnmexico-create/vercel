@@ -565,6 +565,38 @@ from vercel_runtime.vc_init import vc_handler
 
   const files: Files = await glob('**', globOptions);
 
+  // Scan project Python files for django-tasks usage BEFORE adding vendor
+  // packages to `files`. Scanning after vendor addition causes false positives
+  // (e.g. Celery ships an `@task` decorator and would trigger the injection).
+  // Also skip the injection in dev mode: no queue token is set in `vercel dev`
+  // so `patch_enqueue()` falls back to the database backend anyway, and the
+  // consumer file is not on disk so no route exists for it.
+  let hasDjangoTasks = false;
+  if (!meta.isDev) {
+    for (const [filePath, fileRef] of Object.entries(files)) {
+      if (!filePath.endsWith('.py')) continue;
+      try {
+        const source = await fs.promises.readFile(
+          (fileRef as FileFsRef).fsPath,
+          'utf-8'
+        );
+        if (containsDjangoTasks(source)) {
+          hasDjangoTasks = true;
+          if (containsUnsupportedDjangoTaskFeatures(source)) {
+            console.warn(
+              `Warning: "${filePath}" uses django-tasks features (e.g. priority) ` +
+                `that are not supported by the Vercel Queue integration and will ` +
+                `fall back to the database backend.`
+            );
+          }
+          break;
+        }
+      } catch {
+        // Non-filesystem file (FileBlob etc.) — skip.
+      }
+    }
+  }
+
   // Bundle dependencies, using runtime installation for oversized bundles
   const depExternalizer = new PythonDependencyExternalizer({
     venvPath,
@@ -594,34 +626,9 @@ from vercel_runtime.vc_init import vc_handler
   // need our `server.py` to be called something else
   const handlerPyFilename = 'vc__handler__python';
 
-  // Scan project Python files for django-tasks usage.
-  let hasDjangoTasks = false;
-  for (const [filePath, fileRef] of Object.entries(files)) {
-    if (!filePath.endsWith('.py')) continue;
-    try {
-      const source = await fs.promises.readFile(
-        (fileRef as FileFsRef).fsPath,
-        'utf-8'
-      );
-      if (containsDjangoTasks(source)) {
-        hasDjangoTasks = true;
-        if (containsUnsupportedDjangoTaskFeatures(source)) {
-          console.warn(
-            `Warning: "${filePath}" uses django-tasks features (e.g. priority) ` +
-              `that are not supported by the Vercel Queue integration and will ` +
-              `fall back to the database backend.`
-          );
-        }
-        break;
-      }
-    } catch {
-      // Non-filesystem file (FileBlob etc.) — skip.
-    }
-  }
-
   // When django-tasks are detected, inject the auto-generated consumer
-  // entrypoint so it is available in the Lambda bundle regardless of
-  // which entrypoint is being built.
+  // entrypoint so it is available in the Lambda bundle when this function
+  // is built as `api/django_background_task.py`.
   if (hasDjangoTasks) {
     files[DJANGO_BACKGROUND_TASK_ENTRYPOINT] = new FileBlob({
       data: djangoBackgroundTaskSource,

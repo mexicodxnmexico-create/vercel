@@ -51,6 +51,10 @@ module = ["vercel_runtime._vendor.*"]
 ignore_errors = true
 
 [[tool.mypy.overrides]]
+module = ["vercel_runtime._internal.*"]
+ignore_errors = true
+
+[[tool.mypy.overrides]]
 module = ["tests.fixtures.*"]
 ignore_errors = true
 
@@ -58,7 +62,7 @@ ignore_errors = true
 pythonVersion = "3.12"
 typeCheckingMode = "strict"
 include = ["src/vercel_runtime", "tests"]
-exclude = ["src/vercel_runtime/_vendor", "tests/fixtures"]
+exclude = ["src/vercel_runtime/_vendor", "src/vercel_runtime/_internal", "tests/fixtures"]
 extraPaths = ["src"]
 
 [[tool.basedpyright.executionEnvironments]]
@@ -109,6 +113,9 @@ extend-ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
+"src/vercel_runtime/_internal/*.py" = [
+    "PLC0415", # conditional imports for optional dependencies
+]
 "tests/**/*.py" = [
     "N806",    # allow uppercase variable names
     "PLC0415", # guarded/conditional imports in tests

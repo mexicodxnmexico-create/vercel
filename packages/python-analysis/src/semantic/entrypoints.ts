@@ -44,21 +44,37 @@ export async function containsAppOrHandler(source: string): Promise<boolean> {
 }
 
 /**
- * Extract the string value of a top-level constant with the given name.
- * Only considers simple assignments (NAME = "string") and annotated assignments
- * (NAME: str = "string") at module level. Returns the first matching string
- * value, or null if not found or the value is not a string literal.
- *
- * @param source - Python source code
- * @param name - Constant name (e.g. "VERSION", "APP_NAME")
- * @returns The string value or null
+ * Either a directly-found string value, or sibling module names that may define
+ * the constant via import.
+ */
+export interface StringConstantResult {
+  /** The string value if defined directly in this file, or null. */
+  value: string | null;
+  /**
+   * Sibling module names to check when the constant is not defined directly
+   * but may come from an import. Empty when the constant is defined directly,
+   * when a non-sibling explicit import was found (can't resolve), or when
+   * there are no relevant imports at all.
+   */
+  relativeImports: string[];
+}
+
+/**
+ * Extract the string value of a top-level constant with the given name, or
+ * return sibling module names to check when it comes from an import. A constant
+ * is a simple (`NAME = "value"`) or annotated (`NAME: str = "value"`) assignment
+ * at module level.
  */
 export async function getStringConstant(
   source: string,
   name: string
-): Promise<string | null> {
+): Promise<StringConstantResult> {
   const mod = await importWasmModule();
-  return mod.getStringConstant(source, name) ?? null;
+  const result = mod.getStringConstant(source, name);
+  return {
+    value: result.value ?? null,
+    relativeImports: result.relativeImports,
+  };
 }
 
 /** Simple check for DJANGO_SETTINGS_MODULE presence so we can skip WASM when absent */

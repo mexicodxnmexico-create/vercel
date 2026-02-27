@@ -79,37 +79,97 @@ pub(crate) fn contains_app_or_handler_impl(source: &str) -> bool {
     false
 }
 
-/// Extract the string value of a top-level constant with the given name.
-/// Only considers simple assignments (`NAME = "string"`) and annotated assignments
-/// (`NAME: str = "string"`) at module level. Returns the first matching string
-/// value, or None if not found or the value is not a string literal.
-pub(crate) fn get_string_constant_impl(source: &str, name: &str) -> Option<String> {
+/// Either a directly-found string value, or sibling module names that may define
+/// the constant via import.
+pub(crate) struct StringConstantResult {
+    pub value: Option<String>,
+    pub relative_imports: Vec<String>,
+}
+
+/// Extract the string value of a top-level constant with the given name, or return
+/// sibling module names to check when it comes from an import. A constant is a
+/// simple (`NAME = "value"`) or annotated (`NAME: str = "value"`) assignment at module level.
+pub(crate) fn get_string_constant_impl(source: &str, name: &str) -> StringConstantResult {
     let parsed = match parse_module(source) {
         Ok(parsed) => parsed,
-        Err(_) => return None,
+        Err(_) => return StringConstantResult { value: None, relative_imports: vec![] },
     };
+
+    let mut has_definition = false;
+    let mut definition_value: Option<String> = None;
+    // (is_sibling, module_name) — updated on every explicit import of `name`
+    let mut last_explicit_import: Option<(bool, Option<String>)> = None;
+    let mut star_imports: Vec<String> = Vec::new();
+
     for stmt in parsed.suite() {
         match stmt {
             Stmt::Assign(assign) => {
                 if assign.targets.len() == 1 && is_name_expr(&assign.targets[0], name) {
-                    if let Some(s) = expr_to_string_literal(&assign.value) {
-                        return Some(s);
-                    }
+                    has_definition = true;
+                    definition_value = expr_to_string_literal(&assign.value);
                 }
             }
             Stmt::AnnAssign(ann_assign) => {
                 if is_name_expr(&ann_assign.target, name) {
-                    if let Some(value) = &ann_assign.value {
-                        if let Some(s) = expr_to_string_literal(value) {
-                            return Some(s);
+                    has_definition = true;
+                    definition_value = ann_assign
+                        .value
+                        .as_ref()
+                        .and_then(|v| expr_to_string_literal(v));
+                }
+            }
+            Stmt::ImportFrom(import_from) => {
+                let is_star = import_from.names.iter().any(|a| a.name.as_str() == "*");
+                if is_star {
+                    // Collect only sibling star imports; skip non-sibling.
+                    if import_from.level == 1 {
+                        if let Some(module) = &import_from.module {
+                            star_imports.push(module.to_string());
                         }
+                    }
+                } else {
+                    // Track explicit imports of the target name (last one wins).
+                    let imports_name = import_from.names.iter().any(|alias| {
+                        let effective = alias
+                            .asname
+                            .as_ref()
+                            .map(|id| id.as_str())
+                            .unwrap_or_else(|| alias.name.as_str());
+                        effective == name
+                    });
+                    if imports_name {
+                        last_explicit_import = Some((
+                            import_from.level == 1, // is_sibling
+                            import_from.module.as_ref().map(|m| m.to_string()),
+                        ));
                     }
                 }
             }
             _ => {}
         }
     }
-    None
+
+    // Direct definition — return it regardless of imports.
+    if has_definition {
+        return StringConstantResult { value: definition_value, relative_imports: vec![] };
+    }
+
+    // Explicit import found — use the last one.
+    if let Some((is_sibling, module)) = last_explicit_import {
+        if is_sibling {
+            if let Some(mod_name) = module {
+                return StringConstantResult {
+                    value: None,
+                    relative_imports: vec![mod_name],
+                };
+            }
+        }
+        // Non-sibling, or `from . import NAME` (no module name) — give up.
+        return StringConstantResult { value: None, relative_imports: vec![] };
+    }
+
+    // No explicit import — return sibling star imports as candidates.
+    StringConstantResult { value: None, relative_imports: star_imports }
 }
 
 fn is_name_expr(expr: &Expr, name: &str) -> bool {
@@ -312,34 +372,126 @@ def create():
     // get_string_constant_impl
     // -------------------------------------------------------------------------
 
+    fn assert_direct(result: StringConstantResult, expected: Option<&str>) {
+        assert_eq!(result.value.as_deref(), expected);
+        assert!(result.relative_imports.is_empty(), "expected no relative_imports");
+    }
+
+    fn assert_imports(result: StringConstantResult, expected: &[&str]) {
+        assert_eq!(result.value, None);
+        assert_eq!(result.relative_imports, expected);
+    }
+
     #[test]
     fn test_get_string_constant_simple() {
         let source = r#"VERSION = "1.0.0""#;
-        assert_eq!(
-            get_string_constant_impl(source, "VERSION"),
-            Some("1.0.0".to_string())
-        );
+        assert_direct(get_string_constant_impl(source, "VERSION"), Some("1.0.0"));
     }
 
     #[test]
     fn test_get_string_constant_annotated() {
         let source = r#"APP_NAME: str = "myapp""#;
-        assert_eq!(
-            get_string_constant_impl(source, "APP_NAME"),
-            Some("myapp".to_string())
-        );
+        assert_direct(get_string_constant_impl(source, "APP_NAME"), Some("myapp"));
     }
 
     #[test]
     fn test_get_string_constant_not_found() {
         let source = r#"VERSION = "1.0.0""#;
-        assert_eq!(get_string_constant_impl(source, "OTHER"), None);
+        assert_imports(get_string_constant_impl(source, "OTHER"), &[]);
     }
 
     #[test]
     fn test_get_string_constant_non_string_value() {
+        // Has a definition but it's not a string — still suppresses import search.
         let source = r#"COUNT = 42"#;
-        assert_eq!(get_string_constant_impl(source, "COUNT"), None);
+        assert_direct(get_string_constant_impl(source, "COUNT"), None);
+    }
+
+    #[test]
+    fn test_get_string_constant_relative_star_import() {
+        let source = "from .common import *\n";
+        assert_imports(get_string_constant_impl(source, "WSGI_APPLICATION"), &["common"]);
+    }
+
+    #[test]
+    fn test_get_string_constant_non_relative_star_import_ignored() {
+        let source = "from common import *\n";
+        assert_imports(get_string_constant_impl(source, "WSGI_APPLICATION"), &[]);
+    }
+
+    #[test]
+    fn test_get_string_constant_level2_star_import_ignored() {
+        let source = "from ..base import *\n";
+        assert_imports(get_string_constant_impl(source, "WSGI_APPLICATION"), &[]);
+    }
+
+    #[test]
+    fn test_get_string_constant_explicit_relative_import() {
+        let source = "from .base import WSGI_APPLICATION\n";
+        assert_imports(get_string_constant_impl(source, "WSGI_APPLICATION"), &["base"]);
+    }
+
+    #[test]
+    fn test_get_string_constant_explicit_nonrelative_import_gives_up() {
+        let source = "from myapp.base import WSGI_APPLICATION\n";
+        assert_imports(get_string_constant_impl(source, "WSGI_APPLICATION"), &[]);
+    }
+
+    #[test]
+    fn test_get_string_constant_explicit_import_beats_star() {
+        // Explicit relative import takes priority over star imports.
+        let source = "from .common import *\nfrom .prod import WSGI_APPLICATION\n";
+        assert_imports(get_string_constant_impl(source, "WSGI_APPLICATION"), &["prod"]);
+    }
+
+    #[test]
+    fn test_get_string_constant_last_explicit_import_wins() {
+        let source =
+            "from .base import WSGI_APPLICATION\nfrom .prod import WSGI_APPLICATION\n";
+        assert_imports(get_string_constant_impl(source, "WSGI_APPLICATION"), &["prod"]);
+    }
+
+    #[test]
+    fn test_get_string_constant_last_explicit_nonrelative_overrides_relative() {
+        // Non-relative import comes last — give up even though there was a relative one earlier.
+        let source =
+            "from .base import WSGI_APPLICATION\nfrom myapp.prod import WSGI_APPLICATION\n";
+        assert_imports(get_string_constant_impl(source, "WSGI_APPLICATION"), &[]);
+    }
+
+    #[test]
+    fn test_get_string_constant_multiple_star_imports() {
+        let source = "from .base import *\nfrom .local import *\n";
+        assert_imports(
+            get_string_constant_impl(source, "WSGI_APPLICATION"),
+            &["base", "local"],
+        );
+    }
+
+    #[test]
+    fn test_get_string_constant_definition_beats_star_import() {
+        let source = "from .common import *\nWSGI_APPLICATION = 'hello.wsgi.application'\n";
+        assert_direct(
+            get_string_constant_impl(source, "WSGI_APPLICATION"),
+            Some("hello.wsgi.application"),
+        );
+    }
+
+    #[test]
+    fn test_get_string_constant_definition_beats_explicit_import() {
+        let source =
+            "from .base import WSGI_APPLICATION\nWSGI_APPLICATION = 'hello.wsgi.application'\n";
+        assert_direct(
+            get_string_constant_impl(source, "WSGI_APPLICATION"),
+            Some("hello.wsgi.application"),
+        );
+    }
+
+    #[test]
+    fn test_get_string_constant_non_string_definition_beats_imports() {
+        // Even a non-string definition suppresses import search.
+        let source = "from .base import WSGI_APPLICATION\nWSGI_APPLICATION = get_wsgi()\n";
+        assert_direct(get_string_constant_impl(source, "WSGI_APPLICATION"), None);
     }
 
     // -------------------------------------------------------------------------

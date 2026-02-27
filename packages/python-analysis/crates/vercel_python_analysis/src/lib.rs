@@ -15,6 +15,7 @@ use crate::entrypoint::{
     contains_app_or_handler_impl,
     get_string_constant_impl,
     parse_django_settings_module_impl,
+    StringConstantResult,
 };
 
 impl crate::bindings::Guest for PythonAnalyzer {
@@ -29,12 +30,13 @@ impl crate::bindings::Guest for PythonAnalyzer {
         contains_app_or_handler_impl(&source)
     }
 
-    /// Extract the string value of a top-level constant with the given name.
-    /// Only considers simple assignments (`NAME = "string"`) and annotated assignments
-    /// (`NAME: str = "string"`) at module level. Returns the first matching string
-    /// value, or None if not found or the value is not a string literal.
-    fn get_string_constant(source: String, name: String) -> Option<String> {
-        get_string_constant_impl(&source, &name)
+    /// Extract the string value of a top-level constant with the given name, or return
+    /// sibling module names to check when it comes from an import. A constant is a
+    /// simple (`NAME = "value"`) or annotated (`NAME: str = "value"`) assignment at module level.
+    fn get_string_constant(source: String, name: String) -> bindings::StringConstantResult {
+        let StringConstantResult { value, relative_imports } =
+            get_string_constant_impl(&source, &name);
+        bindings::StringConstantResult { value, relative_imports }
     }
 
     /// Extract the default value from `os.environ.setdefault('DJANGO_SETTINGS_MODULE', '...')`

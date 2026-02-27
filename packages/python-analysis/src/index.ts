@@ -16,6 +16,7 @@ export {
   getStringConstant,
   parseDjangoSettingsModule,
 } from './semantic/entrypoints';
+export type { StringConstantResult } from './semantic/entrypoints';
 
 // =============================================================================
 // Installed package analysis (WASM-based .dist-info parsing)

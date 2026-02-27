@@ -1,5 +1,5 @@
 import fs from 'fs';
-import { join } from 'path';
+import { dirname, join } from 'path';
 import {
   containsAppOrHandler,
   getStringConstant,
@@ -67,20 +67,40 @@ export async function getDjangoEntrypoint(
   );
   try {
     const settingsContent = await fs.promises.readFile(settingsPath, 'utf-8');
-    const asgiApplication = await getStringConstant(
-      settingsContent,
-      'ASGI_APPLICATION'
-    );
+    const settingsDir = dirname(settingsPath);
+
+    const resolveSetting = async (name: string): Promise<string | null> => {
+      const { value, relativeImports } = await getStringConstant(
+        settingsContent,
+        name
+      );
+      if (value) return value;
+      for (const mod of relativeImports) {
+        try {
+          const siblingContent = await fs.promises.readFile(
+            join(settingsDir, `${mod}.py`),
+            'utf-8'
+          );
+          const { value: siblingValue } = await getStringConstant(
+            siblingContent,
+            name
+          );
+          if (siblingValue) return siblingValue;
+        } catch {
+          debug(`Could not read sibling settings file: ${mod}.py`);
+        }
+      }
+      return null;
+    };
+
+    const asgiApplication = await resolveSetting('ASGI_APPLICATION');
     if (asgiApplication) {
       const modulePath = asgiApplication.split('.').slice(0, -1).join('/');
       const asgiPath = `${modulePath}.py`;
       debug(`Django ASGI entrypoint from ${settingsModule}: ${asgiPath}`);
       return asgiPath;
     }
-    const wsgiApplication = await getStringConstant(
-      settingsContent,
-      'WSGI_APPLICATION'
-    );
+    const wsgiApplication = await resolveSetting('WSGI_APPLICATION');
     if (wsgiApplication) {
       const modulePath = wsgiApplication.split('.').slice(0, -1).join('/');
       const wsgiPath = `${modulePath}.py`;

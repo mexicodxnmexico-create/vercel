@@ -2,7 +2,7 @@ import fs from 'fs';
 import { dirname, join } from 'path';
 import {
   containsAppOrHandler,
-  getStringConstant,
+  getStringConstantOrImports,
   parseDjangoSettingsModule,
 } from '@vercel/python-analysis';
 import debug from './debug';
@@ -70,7 +70,7 @@ export async function getDjangoEntrypoint(
     const settingsDir = dirname(settingsPath);
 
     const resolveSetting = async (name: string): Promise<string | null> => {
-      const { value, relativeImports } = await getStringConstant(
+      const { value, relativeImports } = await getStringConstantOrImports(
         settingsContent,
         name
       );
@@ -81,7 +81,7 @@ export async function getDjangoEntrypoint(
             join(settingsDir, `${mod}.py`),
             'utf-8'
           );
-          const { value: siblingValue } = await getStringConstant(
+          const { value: siblingValue } = await getStringConstantOrImports(
             siblingContent,
             name
           );

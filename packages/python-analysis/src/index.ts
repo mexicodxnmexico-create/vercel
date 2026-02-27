@@ -14,6 +14,7 @@
 export {
   containsAppOrHandler,
   getStringConstant,
+  getStringConstantOrImports,
   parseDjangoSettingsModule,
 } from './semantic/entrypoints';
 export type { StringConstantResult } from './semantic/entrypoints';

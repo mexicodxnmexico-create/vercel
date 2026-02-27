@@ -60,12 +60,26 @@ export interface StringConstantResult {
 }
 
 /**
+ * Extract the string value of a top-level constant with the given name.
+ * A constant is a simple (`NAME = "value"`) or annotated (`NAME: str = "value"`)
+ * assignment at module level. Returns null if not found or the value is not a
+ * string literal.
+ */
+export async function getStringConstant(
+  source: string,
+  name: string
+): Promise<string | null> {
+  const mod = await importWasmModule();
+  return mod.getStringConstant(source, name).value ?? null;
+}
+
+/**
  * Extract the string value of a top-level constant with the given name, or
  * return sibling module names to check when it comes from an import. A constant
  * is a simple (`NAME = "value"`) or annotated (`NAME: str = "value"`) assignment
  * at module level.
  */
-export async function getStringConstant(
+export async function getStringConstantOrImports(
   source: string,
   name: string
 ): Promise<StringConstantResult> {

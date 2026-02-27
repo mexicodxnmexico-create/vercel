@@ -1218,6 +1218,46 @@ describe('Django entrypoint discovery', () => {
     if (fs.existsSync(workPath)) fs.removeSync(workPath);
   });
 
+  it('resolves Django entrypoint when WSGI_APPLICATION is in a sibling via star import', async () => {
+    const workPath = path.join(
+      tmpdir(),
+      `python-django-wsgi-star-${Date.now()}`
+    );
+    fs.mkdirSync(workPath, { recursive: true });
+
+    await writeFiles(workPath, {
+      'manage.py': `os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'hello.settings')`,
+      'hello/settings.py': `from .base import *`,
+      'hello/base.py': `WSGI_APPLICATION = 'hello.wsgi.application'`,
+      'hello/wsgi.py': `application = lambda env, start: None`,
+    });
+
+    const result = await detectDjangoPythonEntrypoint(workPath, 'missing.py');
+    expect(result).toBe('hello/wsgi.py');
+
+    if (fs.existsSync(workPath)) fs.removeSync(workPath);
+  });
+
+  it('resolves Django entrypoint when WSGI_APPLICATION is explicitly imported from a sibling', async () => {
+    const workPath = path.join(
+      tmpdir(),
+      `python-django-wsgi-explicit-${Date.now()}`
+    );
+    fs.mkdirSync(workPath, { recursive: true });
+
+    await writeFiles(workPath, {
+      'manage.py': `os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'hello.settings')`,
+      'hello/settings.py': `from .base import WSGI_APPLICATION`,
+      'hello/base.py': `WSGI_APPLICATION = 'hello.wsgi.application'`,
+      'hello/wsgi.py': `application = lambda env, start: None`,
+    });
+
+    const result = await detectDjangoPythonEntrypoint(workPath, 'missing.py');
+    expect(result).toBe('hello/wsgi.py');
+
+    if (fs.existsSync(workPath)) fs.removeSync(workPath);
+  });
+
   it('build() discovers Django entrypoint from WSGI_APPLICATION when configured entrypoint is missing', async () => {
     const workPath = path.join(tmpdir(), `python-django-build-${Date.now()}`);
     fs.mkdirSync(workPath, { recursive: true });

@@ -4681,7 +4681,7 @@ export async function getServerActionMetaRoutes(
     }
 
     return routes;
-  } catch (error) {
+  } catch (_error) {
     // If manifest doesn't exist or can't be read, return empty routes
     return [];
   }
